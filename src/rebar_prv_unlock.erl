@@ -49,6 +49,9 @@ do(State) ->
         {ok, _} ->
             Locks = rebar_config:consult_lock_file(LockFile),
             case handle_unlocks(State, Locks, LockFile) of
+                {ok, NewLocks} ->
+                    NewState = rebar_state:set(State, {locks, default}, NewLocks),
+                    {ok, NewState};
                 ok ->
                     {ok, State};
                 {error, Reason} ->
@@ -73,7 +76,8 @@ handle_unlocks(State, Locks, LockFile) ->
         _ when Names =:= [] -> % implicitly all locks
             file:delete(LockFile);
         NewLocks ->
-            rebar_config:write_lock_file(LockFile, NewLocks)
+            rebar_config:write_lock_file(LockFile, NewLocks),
+            {ok, NewLocks}
     end.
 
 parse_names(Bin) ->
