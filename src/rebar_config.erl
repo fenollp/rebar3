@@ -60,7 +60,8 @@ consult(Dir) ->
 %% if any can be found.
 -spec consult_app_file(file:filename()) -> [any()].
 consult_app_file(File) ->
-    consult_file_(File).
+    RootConfig = consult_root(),
+    consult_file_(File, RootConfig).
 
 %% @doc reads the lock file for the project, and re-formats its
 %% content to match the internals for rebar3.
@@ -213,21 +214,25 @@ consult_file(File) ->
     true = verify_config_format(Terms),
     Terms.
 
+%% @equiv consult_file_(File, nil)
+consult_file_(File) ->
+    consult_file_(File, nil).
+
 %% @private reads a given file; if the file has a `.script'-postfixed
 %% counterpart, it is evaluated along with the original file.
--spec consult_file_(file:name()) -> [any()].
-consult_file_(File) when is_binary(File) ->
-    consult_file_(binary_to_list(File));
-consult_file_(File) ->
+-spec consult_file_(file:name(), nil|[any()]) -> [any()].
+consult_file_(File, Cfg) when is_binary(File) ->
+    consult_file_(binary_to_list(File), Cfg);
+consult_file_(File, Cfg) ->
     case filename:extension(File) of
         ".script" ->
-            {ok, Terms} = consult_and_eval(remove_script_ext(File), File),
+            {ok, Terms} = consult_and_eval(remove_script_ext(File), File, Cfg),
             Terms;
         _ ->
             Script = File ++ ".script",
             case filelib:is_regular(Script) of
                 true ->
-                    {ok, Terms} = consult_and_eval(File, Script),
+                    {ok, Terms} = consult_and_eval(File, Script, Cfg),
                     Terms;
                 false ->
                     rebar_file_utils:try_consult(File)
@@ -274,17 +279,24 @@ format_error({bad_dep_name, Dep}) ->
 
 %% @private consults a consult file, then executes its related script file
 %% with the data returned from the consult.
--spec consult_and_eval(File::file:name_all(), Script::file:name_all()) ->
+-spec consult_and_eval(File::file:name_all(), Script::file:name_all(), nil|[any()]) ->
                               {ok, Terms::[term()]} |
                               {error, Reason::term()}.
-consult_and_eval(File, Script) ->
+consult_and_eval(File, Script, Cfg) ->
     ?DEBUG("Evaluating config script ~p", [Script]),
     StateData = rebar_file_utils:try_consult(File),
     %% file:consult/1 always returns the terms as a list, however file:script
     %% can (and will) return any kind of term(), to make consult_and_eval
     %% work the same way as eval we ensure that when no list is returned we
     %% convert it in a list.
-    case file:script(Script, bs([{'CONFIG', StateData}, {'SCRIPT', Script}])) of
+    Bindings = bs([{'CONFIG', StateData}
+                  ,{'SCRIPT', Script}
+                   | case Cfg of
+                         nil -> [];
+                         _ -> [{'REBAR_CONFIG', Cfg}]
+                     end
+                  ]),
+    case file:script(Script, Bindings) of
         {ok, Terms} when is_list(Terms) ->
             {ok, Terms};
         {ok, Term} ->
